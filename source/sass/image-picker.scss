@@ -12,6 +12,21 @@ ul.thumbnails.image_picker_selector
   padding:              0px;
   margin:               0px;
 
+  ul
+  {
+    overflow:             auto;
+    list-style-image:     none;
+    list-style-position:  outside;
+    list-style-type:      none;
+    padding:              0px;
+    margin:               0px;
+  }
+
+  li.group_title
+  {
+    float: none;
+  }
+
   li
   {
     margin:   0px $thumbnail_margin $thumbnail_margin 0px;
@@ -21,15 +36,17 @@ ul.thumbnails.image_picker_selector
     {
       padding:  $thumbnail_padding;
       border:   $thumbnail_border;
-
+      -webkit-user-select: none;
+      -moz-user-select:    none;
+      -ms-user-select:     none;
       img
       {
-
+        -webkit-user-drag: none;
       }
     }
 
-    .thumbnail.selected 
-    { 
+    .thumbnail.selected
+    {
       background: $thumbnail_selected_color;
     }
   }

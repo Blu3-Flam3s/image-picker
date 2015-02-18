@@ -1,25 +1,27 @@
 #
 # Image Picker source
 # by Rodrigo Vera
+# original limit-functionality added by Jason M. Batchelor
 #
-
 jQuery.fn.extend({
   imagepicker: (opts = {}) ->
     this.each () ->
       select = jQuery(this)
-      select.next("ul.image_picker_selector").remove()
+      select.data("picker").destroy() if select.data("picker")
       select.data "picker", new ImagePicker(this, sanitized_options(opts))
-      opts.initialized() if opts.initialized?
+      opts.initialized.call(select.data("picker")) if opts.initialized?
 })
 
 sanitized_options = (opts) ->
   default_options = {
-    hide_select:  true,
-    show_label:   false,
-    initialized:  undefined,
-    changed:      undefined,
-    clicked:      undefined,
-    selected:     undefined,
+    hide_select:      true,
+    show_label:       false,
+    initialized:      undefined,
+    changed:          undefined,
+    clicked:          undefined,
+    selected:         undefined,
+    limit:            undefined,
+    limit_reached:    undefined,
   }
   jQuery.extend(default_options, opts)
 
@@ -30,18 +32,27 @@ class ImagePicker
   constructor: (select_element, @opts={}) ->
     @select         = jQuery(select_element)
     @multiple       = @select.attr("multiple") == "multiple"
+    @opts.limit     = parseInt(@select.data("limit")) if @select.data("limit")?
     @build_and_append_picker()
+
+  destroy: ->
+    for option in @picker_options
+      option.destroy()
+    @picker.remove()
+    @select.unbind("change")
+    @select.removeData "picker"
+    @select.show()
 
   build_and_append_picker: () ->
     @select.hide() if @opts.hide_select
-    @select.change {picker: this}, (event) ->
-      event.data.picker.sync_picker_with_select()
+    @select.change =>
+      @sync_picker_with_select()
     @picker.remove() if @picker?
     @create_picker()
     @select.after(@picker)
     @sync_picker_with_select()
 
-  sync_picker_with_select: () ->
+  sync_picker_with_select: () =>
     for option in @picker_options
       if option.is_selected()
         option.mark_as_selected()
@@ -49,12 +60,23 @@ class ImagePicker
         option.unmark_as_selected()
 
   create_picker: () ->
-    @picker =  jQuery("<ul class='thumbnails image_picker_selector'></ul>")
-    @picker_options = (new ImagePickerOption(option, this, @opts) for option in @select.find("option"))
-    for option in @picker_options
-      continue if !option.has_image()
-      @picker.append( option.node )
+    @picker         =  jQuery("<ul class='thumbnails image_picker_selector'></ul>")
+    @picker_options = []
+    @recursively_parse_option_groups(@select, @picker)
     @picker
+
+  recursively_parse_option_groups: (scoped_dom, target_container) ->
+    for option_group in scoped_dom.children("optgroup")
+      option_group = jQuery(option_group)
+      container    = jQuery("<ul></ul>")
+      container.append jQuery("<li class='group_title'>#{option_group.attr("label")}</li>")
+      target_container.append jQuery("<li>").append(container)
+      @recursively_parse_option_groups(option_group, container)
+    for option in (new ImagePickerOption(option, this, @opts) for option in scoped_dom.children("option"))
+      @picker_options.push option
+      continue if !option.has_image()
+      target_container.append option.node
+
 
   has_implicit_blanks: () ->
     (option for option in @picker_options when (option.is_blank() && !option.has_image())).length > 0
@@ -67,26 +89,36 @@ class ImagePicker
 
   toggle: (imagepicker_option) ->
     old_values = @selected_values()
+    selected_value = imagepicker_option.value().toString()
     if @multiple
-      if imagepicker_option.value() in @selected_values()
-        imagepicker_option.option.prop("selected", false)
+      if selected_value in @selected_values()
+        new_values = @selected_values()
+        new_values.splice( jQuery.inArray(selected_value, old_values), 1)
+        @select.val []
+        @select.val new_values
       else
-        imagepicker_option.option.prop("selected", true)
+        if @opts.limit? && @selected_values().length >= @opts.limit
+          if @opts.limit_reached?
+            @opts.limit_reached.call(@select)
+        else
+          @select.val @selected_values().concat selected_value
     else
       if @has_implicit_blanks() && imagepicker_option.is_selected()
         @select.val("")
       else
-        @select.val(imagepicker_option.value())
-    new_values = @selected_values()
-    unless both_array_are_equal(old_values, new_values)
+        @select.val(selected_value)
+    unless both_array_are_equal(old_values, @selected_values())
       @select.change()
-      @opts.changed() if @opts.changed?
+      @opts.changed.call(@select, old_values, @selected_values()) if @opts.changed?
 
 
 class ImagePickerOption
   constructor: (option_element, @picker, @opts={}) ->
     @option = jQuery(option_element)
     @create_node()
+
+  destroy: ->
+    @node.find(".thumbnail").unbind()
 
   has_image: () ->
     @option.data("img-src")?
@@ -116,10 +148,10 @@ class ImagePickerOption
     else
       @option.text()
 
-  clicked: () ->
+  clicked: () =>
     @picker.toggle(this)
-    @opts.clicked()  if @opts.clicked?
-    @opts.selected() if @opts.selected? and @is_selected()
+    @opts.clicked.call(@picker.select, this)  if @opts.clicked?
+    @opts.selected.call(@picker.select, this) if @opts.selected? and @is_selected()
 
   create_node: () ->
     @node = jQuery("<li/>")
